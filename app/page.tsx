@@ -3,8 +3,9 @@
 import { useState } from 'react';
 
 export default function Home() {
+  const [text, setText] = useState('Hola, esta es una prueba de voz con ElevenLabs.');
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState('');
+  const [message, setMessage] = useState('Escribe un texto y presiona el botón para escucharlo.');
 
   async function testVoice() {
     try {
@@ -16,35 +17,36 @@ export default function Home() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          text: 'Hola Federico, esta demo usa ElevenLabs conectado a tu backend.'
-        }),
+        body: JSON.stringify({ text }),
       });
 
+      const contentType = response.headers.get('content-type') || '';
+
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Error desconocido');
+        if (contentType.includes('application/json')) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Error desconocido');
+        }
+
+        throw new Error(`Error HTTP ${response.status}`);
       }
 
       const blob = await response.blob();
 
       if (blob.size === 0) {
-        throw new Error('Audio vacío');
+        throw new Error('ElevenLabs respondió audio vacío');
       }
 
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
 
-      audio.onended = () => {
-        URL.revokeObjectURL(url);
-      };
+      audio.onended = () => URL.revokeObjectURL(url);
 
       await audio.play();
-
-      setMessage('Audio reproducido correctamente');
+      setMessage('Audio reproducido correctamente.');
     } catch (error: any) {
       console.error(error);
-      setMessage(error.message || 'Error reproduciendo audio');
+      setMessage(error.message || 'Error reproduciendo audio.');
     } finally {
       setLoading(false);
     }
@@ -56,16 +58,21 @@ export default function Home() {
         <h1>OpenAI + ElevenLabs Voice Demo</h1>
 
         <p>
-          Demo mínima para conectar un agente OpenAI con capacidades de voz de ElevenLabs.
+          Escribe un texto, el backend lo manda a ElevenLabs y el navegador reproduce el MP3.
         </p>
 
-        <button onClick={testVoice} disabled={loading}>
-          {loading ? 'Generando voz...' : 'Probar Voz'}
+        <textarea
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          rows={5}
+          placeholder="Escribe el texto que quieres convertir a voz..."
+        />
+
+        <button onClick={testVoice} disabled={loading || text.trim().length === 0}>
+          {loading ? 'Generando voz...' : 'Convertir texto a voz'}
         </button>
 
-        <p style={{ marginTop: 16, opacity: 0.8 }}>
-          {message}
-        </p>
+        <p className="status">{message}</p>
       </div>
     </main>
   );
