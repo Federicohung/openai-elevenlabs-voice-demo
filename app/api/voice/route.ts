@@ -8,34 +8,40 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
 
-    const audio = await elevenlabs.textToSpeech.convert(
+    const audioStream = await elevenlabs.textToSpeech.convert(
       'JBFqnCBsd6RMkjVDRZzb',
       {
         text: body.text || 'Hola desde ElevenLabs',
-        modelId: 'eleven_v3',
+        modelId: 'eleven_multilingual_v2',
         outputFormat: 'mp3_44100_128',
       }
     );
 
-    const chunks = [];
+    const chunks: Uint8Array[] = [];
 
-    for await (const chunk of audio) {
+    for await (const chunk of audioStream) {
       chunks.push(chunk);
     }
 
-    const buffer = Buffer.concat(chunks);
+    const audioBuffer = Buffer.concat(chunks);
 
-    return new Response(buffer, {
+    return new Response(audioBuffer, {
+      status: 200,
       headers: {
         'Content-Type': 'audio/mpeg',
+        'Content-Length': audioBuffer.length.toString(),
       },
     });
-  } catch (error) {
-    console.error(error);
+  } catch (error: any) {
+    console.error('ELEVENLABS ERROR:', error);
 
     return Response.json(
-      { error: 'Error generando voz' },
-      { status: 500 }
+      {
+        error: error.message || 'Error generando voz',
+      },
+      {
+        status: 500,
+      }
     );
   }
 }
