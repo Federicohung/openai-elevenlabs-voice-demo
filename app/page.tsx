@@ -1,79 +1,153 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+
+type ChatMessage = { role: 'user' | 'assistant'; content: string };
 
 export default function Home() {
-  const [text, setText] = useState('Hola, esta es una prueba de voz con ElevenLabs.');
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    { role: 'assistant', content: 'Hola, gracias por contactar con Restaurante Balandros. Te ayudo con tu reserva. ¿Para qué día te gustaría venir?' },
+  ]);
+  const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState('Escribe un texto y presiona el botón para escucharlo.');
+  const [recording, setRecording] = useState(false);
+  const [status, setStatus] = useState('');
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
 
-  async function testVoice() {
+  async function sendMessage(text: string) {
+    const clean = text.trim();
+    if (!clean || loading) return;
+    const nextMessages: ChatMessage[] = [...messages, { role: 'user', content: clean }];
+    setMessages(nextMessages);
+    setInput('');
+    setLoading(true);
+    setStatus('Balandros está escribiendo...');
+
     try {
-      setLoading(true);
-      setMessage('Generando voz...');
-
-      const response = await fetch('/api/voice', {
+      const response = await fetch('/api/chat', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ text }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: clean, history: messages }),
       });
-
-      const contentType = response.headers.get('content-type') || '';
-
-      if (!response.ok) {
-        if (contentType.includes('application/json')) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || 'Error desconocido');
-        }
-
-        throw new Error(`Error HTTP ${response.status}`);
-      }
-
-      const blob = await response.blob();
-
-      if (blob.size === 0) {
-        throw new Error('ElevenLabs respondió audio vacío');
-      }
-
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-
-      audio.onended = () => URL.revokeObjectURL(url);
-
-      await audio.play();
-      setMessage('Audio reproducido correctamente.');
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Error del agente');
+      setMessages([...nextMessages, { role: 'assistant', content: data.text }]);
     } catch (error: any) {
-      console.error(error);
-      setMessage(error.message || 'Error reproduciendo audio.');
+      setMessages([...nextMessages, { role: 'assistant', content: error.message || 'Ha ocurrido un error.' }]);
     } finally {
       setLoading(false);
+      setStatus('');
+    }
+  }
+
+  async function playVoice(text: string) {
+    setStatus('Generando audio...');
+    try {
+      const response = await fetch('/api/voice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Error generando voz');
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.onended = () => URL.revokeObjectURL(url);
+      await audio.play();
+    } catch (error: any) {
+      alert(error.message || 'No se pudo reproducir el audio');
+    } finally {
+      setStatus('');
+    }
+  }
+
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      chunksRef.current = [];
+      recorder.ondataavailable = (event) => chunksRef.current.push(event.data);
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((track) => track.stop());
+        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        await transcribeAndSend(blob);
+      };
+      recorderRef.current = recorder;
+      recorder.start();
+      setRecording(true);
+      setStatus('Grabando nota de voz...');
+    } catch {
+      alert('No se pudo acceder al micrófono.');
+    }
+  }
+
+  async function stopRecording() {
+    recorderRef.current?.stop();
+    setRecording(false);
+    setStatus('Transcribiendo audio...');
+  }
+
+  async function transcribeAndSend(blob: Blob) {
+    try {
+      const formData = new FormData();
+      formData.append('file', blob, 'voice-note.webm');
+      const response = await fetch('/api/transcribe', { method: 'POST', body: formData });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Error transcribiendo');
+      await sendMessage(data.text);
+    } catch (error: any) {
+      alert(error.message || 'No se pudo transcribir el audio');
+    } finally {
+      setStatus('');
     }
   }
 
   return (
-    <main className="container">
-      <div className="card">
-        <h1>OpenAI + ElevenLabs Voice Demo</h1>
+    <main className="chatShell">
+      <section className="phoneFrame">
+        <header className="chatHeader">
+          <div className="avatar">B</div>
+          <div>
+            <h1>Restaurante Balandros</h1>
+            <p>Asistente de reservas</p>
+          </div>
+        </header>
 
-        <p>
-          Escribe un texto, el backend lo manda a ElevenLabs y el navegador reproduce el MP3.
-        </p>
+        <div className="messages">
+          {messages.map((message, index) => (
+            <div key={index} className={`bubbleRow ${message.role}`}>
+              <div className="bubble">
+                <p>{message.content}</p>
+                {message.role === 'assistant' && (
+                  <button className="speak" onClick={() => playVoice(message.content)}>Escuchar</button>
+                )}
+              </div>
+            </div>
+          ))}
+          {loading && <div className="typing">escribiendo...</div>}
+        </div>
 
-        <textarea
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          rows={5}
-          placeholder="Escribe el texto que quieres convertir a voz..."
-        />
+        {status && <div className="status">{status}</div>}
 
-        <button onClick={testVoice} disabled={loading || text.trim().length === 0}>
-          {loading ? 'Generando voz...' : 'Convertir texto a voz'}
-        </button>
-
-        <p className="status">{message}</p>
-      </div>
+        <footer className="composer">
+          <button className={`mic ${recording ? 'recording' : ''}`} onClick={recording ? stopRecording : startRecording}>
+            {recording ? '■' : '🎙️'}
+          </button>
+          <input
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') sendMessage(input);
+            }}
+            placeholder="Escribe un mensaje..."
+          />
+          <button className="send" onClick={() => sendMessage(input)}>Enviar</button>
+        </footer>
+      </section>
     </main>
   );
 }
