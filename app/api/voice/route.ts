@@ -1,19 +1,41 @@
-import { ElevenLabsClient } from '@elevenlabs/elevenlabs-js';
-
-const elevenlabs = new ElevenLabsClient({ apiKey: process.env.ELEVENLABS_API_KEY });
+export const dynamic = 'force-dynamic';
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const text = String(body.text || '').trim();
-    if (!text) return Response.json({ error: 'Texto vacío' }, { status: 400 });
-    const audioStream = await elevenlabs.textToSpeech.convert('JBFqnCBsd6RMkjVDRZzb', { text, modelId: 'eleven_multilingual_v2', outputFormat: 'mp3_44100_128' });
-    const chunks: Uint8Array[] = [];
-    for await (const chunk of audioStream) chunks.push(chunk);
-    const audioBuffer = Buffer.concat(chunks);
-    return new Response(audioBuffer, { status: 200, headers: { 'Content-Type': 'audio/mpeg', 'Content-Length': audioBuffer.length.toString() } });
+    const text = String(body.text || 'Hola desde Balandros');
+
+    const apiKey = process.env.ELEVENLABS_API_KEY;
+
+    if (!apiKey) {
+      return Response.json({ error: 'ELEVENLABS_API_KEY no configurada' }, { status: 500 });
+    }
+
+    const response = await fetch('https://api.elevenlabs.io/v1/text-to-speech/JBFqnCBsd6RMkjVDRZzb', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'xi-api-key': apiKey,
+      },
+      body: JSON.stringify({
+        text,
+        model_id: 'eleven_multilingual_v2',
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return Response.json({ error: errorText }, { status: response.status });
+    }
+
+    const audioBuffer = await response.arrayBuffer();
+
+    return new Response(audioBuffer, {
+      headers: {
+        'Content-Type': 'audio/mpeg',
+      },
+    });
   } catch (error: any) {
-    console.error('VOICE ERROR', error);
     return Response.json({ error: error.message || 'Error generando voz' }, { status: 500 });
   }
 }
